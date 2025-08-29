@@ -18,7 +18,8 @@ class WebSocketService {
         origin: [
           'http://localhost:5173',
           'http://127.0.0.1:5173',
-          'https://status-backend-k1tx.onrender.com'
+          'https://status-backend-k1tx.onrender.com',
+          'https://status-client-omega.vercel.app'
         ],
         credentials: true,
         methods: ['GET', 'POST']
@@ -73,7 +74,7 @@ class WebSocketService {
   handleAuthentication(socket, data) {
     try {
       const { userId, organizationId, tenantId, userRole } = data;
-      
+
       // Store client information
       this.connectedClients.set(socket.id, {
         userId,
@@ -126,7 +127,7 @@ class WebSocketService {
       }
 
       socket.join(`org:${organizationId}`);
-      
+
       // Update client info
       const clientInfo = this.connectedClients.get(socket.id);
       if (clientInfo) {
@@ -160,7 +161,7 @@ class WebSocketService {
       }
 
       socket.leave(`org:${organizationId}`);
-      
+
       socket.emit('left-organization', {
         organizationId,
         timestamp: new Date().toISOString()
