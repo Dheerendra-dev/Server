@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Client Example - Team Management Status Updates</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .connected { background-color: #d4edda; color: #155724; }
+        .disconnected { background-color: #f8d7da; color: #721c24; }
+        .error { background-color: #fff3cd; color: #856404; }
+        .update { background-color: #cce7ff; color: #004085; }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #6c757d; cursor: not-allowed; }
+        input, select {
+            padding: 8px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .log {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 15px;
+            border-radius: 4px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .form-group {
+            margin: 10px 0;
+        }
+        label {
+            display: inline-block;
+            width: 150px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔌 WebSocket Client - Team Management Status Updates</h1>
+    
+    <div class="container">
+        <h2>Connection Settings</h2>
+        <div class="form-group">
+            <label>Server URL:</label>
+            <input type="text" id="serverUrl" value="http://localhost:5000" />
+        </div>
+        <div class="form-group">
+            <label>User ID:</label>
+            <input type="text" id="userId" value="user-123" />
+        </div>
+        <div class="form-group">
+            <label>Organization ID:</label>
+            <input type="text" id="organizationId" value="org-456" />
+        </div>
+        <div class="form-group">
+            <label>Tenant ID:</label>
+            <input type="text" id="tenantId" value="tenant-789" />
+        </div>
+        <div class="form-group">
+            <label>User Role:</label>
+            <select id="userRole">
+                <option value="admin">Admin</option>
+                <option value="manager">Manager</option>
+                <option value="member">Member</option>
+                <option value="viewer">Viewer</option>
+            </select>
+        </div>
+        <button id="connectBtn" onclick="connect()">Connect</button>
+        <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+        <button onclick="authenticate()">Authenticate</button>
+        <button onclick="joinOrganization()">Join Organization</button>
+        <button onclick="leaveOrganization()">Leave Organization</button>
+        <button onclick="sendPing()">Send Ping</button>
+    </div>
+
+    <div class="container">
+        <h2>Connection Status</h2>
+        <div id="connectionStatus" class="status disconnected">Disconnected</div>
+    </div>
+
+    <div class="container">
+        <h2>Real-time Updates</h2>
+        <div id="updates"></div>
+    </div>
+
+    <div class="container">
+        <h2>Event Log</h2>
+        <button onclick="clearLog()">Clear Log</button>
+        <div id="log" class="log"></div>
+    </div>
+
+    <script>
+        let socket = null;
+        let isConnected = false;
+
+        function log(message, type = 'info') {
+            const logElement = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = `[${timestamp}] ${type.toUpperCase()}: ${message}\n`;
+            logElement.textContent += logEntry;
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+
+        function updateConnectionStatus(status, message) {
+            const statusElement = document.getElementById('connectionStatus');
+            statusElement.textContent = message;
+            statusElement.className = `status ${status}`;
+        }
+
+        function updateButtons() {
+            document.getElementById('connectBtn').disabled = isConnected;
+            document.getElementById('disconnectBtn').disabled = !isConnected;
+        }
+
+        function connect() {
+            const serverUrl = document.getElementById('serverUrl').value;
+            
+            try {
+                socket = io(serverUrl, {
+                    transports: ['websocket', 'polling'],
+                    timeout: 5000
+                });
+
+                socket.on('connect', () => {
+                    isConnected = true;
+                    updateConnectionStatus('connected', `Connected to ${serverUrl}`);
+                    updateButtons();
+                    log(`Connected to server: ${serverUrl}`);
+                });
+
+                socket.on('disconnect', (reason) => {
+                    isConnected = false;
+                    updateConnectionStatus('disconnected', `Disconnected: ${reason}`);
+                    updateButtons();
+                    log(`Disconnected: ${reason}`, 'warn');
+                });
+
+                socket.on('connect_error', (error) => {
+                    updateConnectionStatus('error', `Connection error: ${error.message}`);
+                    log(`Connection error: ${error.message}`, 'error');
+                });
+
+                // Authentication events
+                socket.on('authenticated', (data) => {
+                    log(`Authenticated successfully: ${JSON.stringify(data)}`);
+                    showUpdate('Authentication', 'Successfully authenticated', 'success');
+                });
+
+                socket.on('authentication-error', (data) => {
+                    log(`Authentication error: ${JSON.stringify(data)}`, 'error');
+                    showUpdate('Authentication', 'Authentication failed', 'error');
+                });
+
+                // Organization events
+                socket.on('joined-organization', (data) => {
+                    log(`Joined organization: ${JSON.stringify(data)}`);
+                    showUpdate('Organization', `Joined organization: ${data.organizationId}`, 'success');
+                });
+
+                socket.on('left-organization', (data) => {
+                    log(`Left organization: ${JSON.stringify(data)}`);
+                    showUpdate('Organization', `Left organization: ${data.organizationId}`, 'info');
+                });
+
+                // Real-time update events
+                socket.on('service-update', (data) => {
+                    log(`Service update received: ${JSON.stringify(data)}`);
+                    showUpdate('Service Update', `${data.data.name}: ${data.data.status}`, 'update');
+                });
+
+                socket.on('incident-update', (data) => {
+                    log(`Incident update received: ${JSON.stringify(data)}`);
+                    showUpdate('Incident Update', `${data.data.title}: ${data.data.status}`, 'update');
+                });
+
+                socket.on('status-update', (data) => {
+                    log(`Status update received: ${JSON.stringify(data)}`);
+                    showUpdate('System Status', `Overall: ${data.data.overallStatus}`, 'update');
+                });
+
+                // Ping/Pong
+                socket.on('pong', (data) => {
+                    log(`Pong received: ${JSON.stringify(data)}`);
+                });
+
+                // Error handling
+                socket.on('error', (data) => {
+                    log(`Error: ${JSON.stringify(data)}`, 'error');
+                    showUpdate('Error', data.message, 'error');
+                });
+
+            } catch (error) {
+                log(`Failed to connect: ${error.message}`, 'error');
+                updateConnectionStatus('error', `Failed to connect: ${error.message}`);
+            }
+        }
+
+        function disconnect() {
+            if (socket) {
+                socket.disconnect();
+                socket = null;
+                isConnected = false;
+                updateConnectionStatus('disconnected', 'Manually disconnected');
+                updateButtons();
+                log('Manually disconnected');
+            }
+        }
+
+        function authenticate() {
+            if (!socket || !isConnected) {
+                log('Not connected to server', 'error');
+                return;
+            }
+
+            const authData = {
+                userId: document.getElementById('userId').value,
+                organizationId: document.getElementById('organizationId').value,
+                tenantId: document.getElementById('tenantId').value,
+                userRole: document.getElementById('userRole').value
+            };
+
+            socket.emit('authenticate', authData);
+            log(`Sending authentication: ${JSON.stringify(authData)}`);
+        }
+
+        function joinOrganization() {
+            if (!socket || !isConnected) {
+                log('Not connected to server', 'error');
+                return;
+            }
+
+            const orgData = {
+                organizationId: document.getElementById('organizationId').value
+            };
+
+            socket.emit('join-organization', orgData);
+            log(`Joining organization: ${JSON.stringify(orgData)}`);
+        }
+
+        function leaveOrganization() {
+            if (!socket || !isConnected) {
+                log('Not connected to server', 'error');
+                return;
+            }
+
+            const orgData = {
+                organizationId: document.getElementById('organizationId').value
+            };
+
+            socket.emit('leave-organization', orgData);
+            log(`Leaving organization: ${JSON.stringify(orgData)}`);
+        }
+
+        function sendPing() {
+            if (!socket || !isConnected) {
+                log('Not connected to server', 'error');
+                return;
+            }
+
+            socket.emit('ping');
+            log('Ping sent');
+        }
+
+        function showUpdate(type, message, status) {
+            const updatesElement = document.getElementById('updates');
+            const updateDiv = document.createElement('div');
+            updateDiv.className = `status ${status}`;
+            updateDiv.innerHTML = `<strong>${type}:</strong> ${message} <small>(${new Date().toLocaleTimeString()})</small>`;
+            updatesElement.insertBefore(updateDiv, updatesElement.firstChild);
+            
+            // Keep only last 10 updates
+            while (updatesElement.children.length > 10) {
+                updatesElement.removeChild(updatesElement.lastChild);
+            }
+        }
+
+        function clearLog() {
+            document.getElementById('log').textContent = '';
+        }
+
+        // Initialize
+        updateButtons();
+        log('WebSocket client initialized');
+    </script>
+</body>
+</html>

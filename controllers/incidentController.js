@@ -1,4 +1,5 @@
 const { v4: uuidv4 } = require('uuid');
+const websocketService = require('../services/websocketService');
 
 // In-memory storage (replace with database later)
 let incidents = [
@@ -53,8 +54,8 @@ const getIncidentById = (req, res) => {
 // Create new incident
 const createIncident = (req, res) => {
   try {
-    const { title, description, impact = 'minor', affectedServices = [] } = req.body;
-    
+    const { title, description, impact = 'minor', affectedServices = [], organizationId, tenantId } = req.body;
+
     if (!title || !description) {
       return res.status(400).json({ error: 'Title and description are required' });
     }
@@ -66,12 +67,18 @@ const createIncident = (req, res) => {
       status: 'investigating',
       impact,
       affectedServices,
+      organizationId,
+      tenantId,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       updates: []
     };
 
     incidents.push(newIncident);
+
+    // Broadcast incident creation via WebSocket
+    websocketService.broadcastIncidentUpdate(newIncident, organizationId, tenantId);
+
     res.status(201).json(newIncident);
   } catch (error) {
     res.status(500).json({ error: 'Failed to create incident' });
@@ -86,7 +93,7 @@ const updateIncident = (req, res) => {
       return res.status(404).json({ error: 'Incident not found' });
     }
 
-    const { title, description, status, impact, affectedServices } = req.body;
+    const { title, description, status, impact, affectedServices, organizationId, tenantId } = req.body;
     const updatedIncident = {
       ...incidents[incidentIndex],
       ...(title && { title }),
@@ -94,10 +101,20 @@ const updateIncident = (req, res) => {
       ...(status && { status }),
       ...(impact && { impact }),
       ...(affectedServices && { affectedServices }),
+      ...(organizationId && { organizationId }),
+      ...(tenantId && { tenantId }),
       updatedAt: new Date().toISOString()
     };
 
     incidents[incidentIndex] = updatedIncident;
+
+    // Broadcast incident update via WebSocket
+    websocketService.broadcastIncidentUpdate(
+      updatedIncident,
+      updatedIncident.organizationId,
+      updatedIncident.tenantId
+    );
+
     res.json(updatedIncident);
   } catch (error) {
     res.status(500).json({ error: 'Failed to update incident' });
@@ -128,6 +145,13 @@ const addIncidentUpdate = (req, res) => {
     incidents[incidentIndex].status = status;
     incidents[incidentIndex].updatedAt = new Date().toISOString();
 
+    // Broadcast incident update via WebSocket
+    websocketService.broadcastIncidentUpdate(
+      incidents[incidentIndex],
+      incidents[incidentIndex].organizationId,
+      incidents[incidentIndex].tenantId
+    );
+
     res.status(201).json(newUpdate);
   } catch (error) {
     res.status(500).json({ error: 'Failed to add incident update' });
@@ -142,7 +166,16 @@ const deleteIncident = (req, res) => {
       return res.status(404).json({ error: 'Incident not found' });
     }
 
+    const deletedIncident = incidents[incidentIndex];
     incidents.splice(incidentIndex, 1);
+
+    // Broadcast incident deletion via WebSocket
+    websocketService.broadcastIncidentUpdate(
+      { ...deletedIncident, deleted: true },
+      deletedIncident.organizationId,
+      deletedIncident.tenantId
+    );
+
     res.status(204).send();
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete incident' });
